@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AbsaOSS/k8gb/controllers/providers"
+	"github.com/AbsaOSS/k8gb/controllers/providers/route53"
+
 	"github.com/AbsaOSS/k8gb/controllers/providers/ns1"
 
 	"github.com/AbsaOSS/k8gb/controllers/providers/infoblox"
@@ -371,25 +374,24 @@ func (r *GslbReconciler) createZoneDelegationRecordsForExternalDNS(gslb *k8gbv1b
 }
 
 func (r *GslbReconciler) configureZoneDelegation(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error) {
+	var provider providers.IDnsProvider
+	var err error
 	switch r.Config.EdgeDNSType {
 	case depresolver.DNSTypeRoute53:
-		return r.createZoneDelegationRecordsForExternalDNS(gslb, "route53")
+		provider, err = route53.NewRoute53(r.Config, gslb, r.Client)
 	case depresolver.DNSTypeNS1:
-		provider, err := ns1.NewNs1(r.Config, gslb, r.Client)
-		if err != nil {
-			return nil, err
-		}
-		return provider.ConfigureZoneDelegation()
+		provider, err = ns1.NewNs1(r.Config, gslb, r.Client)
 	case depresolver.DNSTypeInfoblox:
-		provider, err := infoblox.NewInfoblox(r.Config, gslb, r.Client)
-		if err != nil {
-			return nil, err
-		}
-		return provider.ConfigureZoneDelegation()
+		provider, err = infoblox.NewInfoblox(r.Config, gslb, r.Client)
 	case depresolver.DNSTypeNoEdgeDNS:
 		return nil, nil
+	default:
+		return nil, coreerrors.New("unhandled DNS type")
 	}
-	return nil, coreerrors.New("unhandled DNS type...")
+	if err != nil {
+		return nil, err
+	}
+	return provider.ConfigureZoneDelegation()
 }
 
 func (r *GslbReconciler) ensureDNSEndpoint(

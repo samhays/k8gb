@@ -7,7 +7,7 @@ import (
 	"github.com/lixiangzhong/dnsutil"
 )
 
-// Dig digs
+// Dig returns the list of IPs
 func Dig(edgeDNSServer, fqdn string) ([]string, error) {
 	var dig dnsutil.Dig
 	if edgeDNSServer == "" {

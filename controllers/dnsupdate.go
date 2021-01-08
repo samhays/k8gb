@@ -225,38 +225,6 @@ func (r *GslbReconciler) nsServerNameExt() []string {
 	return extNSServers
 }
 
-type fakeInfobloxConnector struct {
-	// createObjectObj interface{}
-
-	getObjectObj interface{}
-	getObjectRef string
-
-	// deleteObjectRef string
-
-	// updateObjectObj interface{}
-	// updateObjectRef string
-
-	resultObject interface{}
-
-	fakeRefReturn string
-}
-
-func (c *fakeInfobloxConnector) CreateObject(ibclient.IBObject) (string, error) {
-	return c.fakeRefReturn, nil
-}
-
-func (c *fakeInfobloxConnector) GetObject(ibclient.IBObject, string, interface{}) (err error) {
-	return nil
-}
-
-func (c *fakeInfobloxConnector) DeleteObject(string) (string, error) {
-	return c.fakeRefReturn, nil
-}
-
-func (c *fakeInfobloxConnector) UpdateObject(ibclient.IBObject, string) (string, error) {
-	return c.fakeRefReturn, nil
-}
-
 func checkAliveFromTXT(fqdn string, config *depresolver.Config, splitBrainThreshold time.Duration) error {
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeTXT)

@@ -5,11 +5,7 @@ import (
 	"sort"
 
 	"github.com/lixiangzhong/dnsutil"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
-
-// TODO: remove log and keep logging on the caller
-var log = logf.Log.WithName("controller_gslb")
 
 // Dig digs
 func Dig(edgeDNSServer, fqdn string) ([]string, error) {
@@ -19,12 +15,12 @@ func Dig(edgeDNSServer, fqdn string) ([]string, error) {
 	}
 	err := dig.SetDNS(edgeDNSServer)
 	if err != nil {
-		log.Info(fmt.Sprintf("Can't set query dns (%s) with error(%s)", edgeDNSServer, err))
+		err = fmt.Errorf("can't set query dns (%s) with error(%w)", edgeDNSServer, err)
 		return nil, err
 	}
 	a, err := dig.A(fqdn)
 	if err != nil {
-		log.Info(fmt.Sprintf("Can't dig fqdn(%s) with error(%s)", fqdn, err))
+		err = fmt.Errorf("can't dig fqdn(%s) with error(%w)", fqdn, err)
 		return nil, err
 	}
 	var IPs []string

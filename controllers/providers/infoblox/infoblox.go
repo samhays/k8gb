@@ -230,6 +230,7 @@ func (i *Infoblox) getGslbIngressIPs(gslb *k8gbv1beta1.Gslb) ([]string, error) {
 		if len(ip.Hostname) > 0 {
 			IPs, err := utils.Dig(i.config.EdgeDNSServer, ip.Hostname)
 			if err != nil {
+				log.Info(err.Error())
 				return nil, err
 			}
 			gslbIngressIPs = append(gslbIngressIPs, IPs...)

@@ -30,7 +30,7 @@ type Infoblox struct {
 	client client.Client
 }
 
-func NewInfoblox(config *depresolver.Config, gslb *k8gbv1beta1.Gslb) (i *Infoblox, err error) {
+func NewInfoblox(config *depresolver.Config, gslb *k8gbv1beta1.Gslb, client client.Client) (i *Infoblox, err error) {
 	if gslb == nil {
 		return i, fmt.Errorf("nil *Gslb")
 	}
@@ -40,6 +40,7 @@ func NewInfoblox(config *depresolver.Config, gslb *k8gbv1beta1.Gslb) (i *Infoblo
 	i = &Infoblox{
 		gslb:   gslb,
 		config: config,
+		client: client,
 	}
 	return
 }

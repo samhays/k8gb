@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/AbsaOSS/k8gb/controllers/providers/infoblox"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/AbsaOSS/k8gb/controllers/providers/infoblox"
 
 	"github.com/AbsaOSS/k8gb/controllers/depresolver"
 
@@ -257,45 +257,6 @@ func (c *fakeInfobloxConnector) UpdateObject(ibclient.IBObject, string) (string,
 	return c.fakeRefReturn, nil
 }
 
-func infobloxConnection(config *depresolver.Config) (*ibclient.ObjectManager, error) {
-	hostConfig := ibclient.HostConfig{
-		Host:     config.Infoblox.Host,
-		Version:  config.Infoblox.Version,
-		Port:     strconv.Itoa(config.Infoblox.Port),
-		Username: config.Infoblox.Username,
-		Password: config.Infoblox.Password,
-	}
-	transportConfig := ibclient.NewTransportConfig("false", 20, 10)
-	requestBuilder := &ibclient.WapiRequestBuilder{}
-	requestor := &ibclient.WapiHttpRequestor{}
-
-	var objMgr *ibclient.ObjectManager
-
-	if config.Override.FakeInfobloxEnabled {
-		fqdn := "fakezone.example.com"
-		fakeRefReturn := "zone_delegated/ZG5zLnpvbmUkLl9kZWZhdWx0LnphLmNvLmFic2EuY2Fhcy5vaG15Z2xiLmdzbGJpYmNsaWVudA:fakezone.example.com/default"
-		ohmyFakeConnector := &fakeInfobloxConnector{
-			getObjectObj: ibclient.NewZoneDelegated(ibclient.ZoneDelegated{Fqdn: fqdn}),
-			getObjectRef: "",
-			resultObject: []ibclient.ZoneDelegated{*ibclient.NewZoneDelegated(ibclient.ZoneDelegated{Fqdn: fqdn, Ref: fakeRefReturn})},
-		}
-		objMgr = ibclient.NewObjectManager(ohmyFakeConnector, "ohmyclient", "")
-	} else {
-		conn, err := ibclient.NewConnector(hostConfig, transportConfig, requestBuilder, requestor)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			err = conn.Logout()
-			if err != nil {
-				log.Error(err, "Failed to close connection to infoblox")
-			}
-		}()
-		objMgr = ibclient.NewObjectManager(conn, "ohmyclient", "")
-	}
-	return objMgr, nil
-}
-
 func checkAliveFromTXT(fqdn string, config *depresolver.Config, splitBrainThreshold time.Duration) error {
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeTXT)
@@ -446,87 +407,11 @@ func (r *GslbReconciler) configureZoneDelegation(gslb *k8gbv1beta1.Gslb) (*recon
 	case depresolver.DNSTypeNS1:
 		return r.createZoneDelegationRecordsForExternalDNS(gslb, "ns1")
 	case depresolver.DNSTypeInfoblox:
-		provider, err := infoblox.NewInfoblox(r.Config,gslb)
+		provider, err := infoblox.NewInfoblox(r.Config, gslb, r.Client)
 		if err != nil {
 			return nil, err
 		}
 		return provider.ConfigureZoneDelegation()
-		//
-		//objMgr, err := infobloxConnection(r.Config)
-		//if err != nil {
-		//	return &reconcile.Result{}, err
-		//}
-		//addresses, err := r.getGslbIngressIPs(gslb)
-		//if err != nil {
-		//	return &reconcile.Result{}, err
-		//}
-		//var delegateTo []ibclient.NameServer
-		//
-		//for _, address := range addresses {
-		//	nameServer := ibclient.NameServer{Address: address, Name: r.nsServerName()}
-		//	delegateTo = append(delegateTo, nameServer)
-		//}
-		//
-		//findZone, err := objMgr.GetZoneDelegated(r.Config.DNSZone)
-		//if err != nil {
-		//	return &reconcile.Result{}, err
-		//}
-		//
-		//if findZone != nil {
-		//	err = checkZoneDelegated(findZone, r.Config.DNSZone)
-		//	if err != nil {
-		//		return &reconcile.Result{}, err
-		//	}
-		//	if len(findZone.Ref) > 0 {
-		//
-		//		// Drop own records for straight away update
-		//		existingDelegateTo := filterOutDelegateTo(findZone.DelegateTo, r.nsServerName())
-		//		existingDelegateTo = append(existingDelegateTo, delegateTo...)
-		//
-		//		// Drop external records if they are stale
-		//		extClusters := getExternalClusterHeartbeatFQDNs(gslb, r.Config)
-		//		for _, extCluster := range extClusters {
-		//			err = checkAliveFromTXT(extCluster, r.Config, time.Second*time.Duration(gslb.Spec.Strategy.SplitBrainThresholdSeconds))
-		//			if err != nil {
-		//				log.Error(err, "got the error from TXT based checkAlive")
-		//				log.Info(fmt.Sprintf("External cluster (%s) doesn't look alive, filtering it out from delegated zone configuration...", extCluster))
-		//				existingDelegateTo = filterOutDelegateTo(existingDelegateTo, extCluster)
-		//			}
-		//		}
-		//		log.Info(fmt.Sprintf("Updating delegated zone(%s) with the server list(%v)", r.Config.DNSZone, existingDelegateTo))
-		//
-		//		_, err = objMgr.UpdateZoneDelegated(findZone.Ref, existingDelegateTo)
-		//		if err != nil {
-		//			return &reconcile.Result{}, err
-		//		}
-		//	}
-		//} else {
-		//	log.Info(fmt.Sprintf("Creating delegated zone(%s)...", r.Config.DNSZone))
-		//	_, err = objMgr.CreateZoneDelegated(r.Config.DNSZone, delegateTo)
-		//	if err != nil {
-		//		return &reconcile.Result{}, err
-		//	}
-		//}
-		//
-		//edgeTimestamp := fmt.Sprint(time.Now().UTC().Format("2006-01-02T15:04:05"))
-		//heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", gslb.Name, r.Config.ClusterGeoTag, r.Config.EdgeDNSZone)
-		//heartbeatTXTRecord, err := objMgr.GetTXTRecord(heartbeatTXTName)
-		//if err != nil {
-		//	return &reconcile.Result{}, err
-		//}
-		//if heartbeatTXTRecord == nil {
-		//	log.Info(fmt.Sprintf("Creating split brain TXT record(%s)...", heartbeatTXTName))
-		//	_, err := objMgr.CreateTXTRecord(heartbeatTXTName, edgeTimestamp, gslb.Spec.Strategy.DNSTtlSeconds, "default")
-		//	if err != nil {
-		//		return &reconcile.Result{}, err
-		//	}
-		//} else {
-		//	log.Info(fmt.Sprintf("Updating split brain TXT record(%s)...", heartbeatTXTName))
-		//	_, err := objMgr.UpdateTXTRecord(heartbeatTXTName, edgeTimestamp)
-		//	if err != nil {
-		//		return &reconcile.Result{}, err
-		//	}
-		//}
 	case depresolver.DNSTypeNoEdgeDNS:
 		return nil, nil
 	}
@@ -572,14 +457,6 @@ func (r *GslbReconciler) ensureDNSEndpoint(
 	}
 
 	return nil, nil
-}
-
-func checkZoneDelegated(findZone *ibclient.ZoneDelegated, gslbZoneName string) error {
-	if findZone.Fqdn != gslbZoneName {
-		err := fmt.Errorf("delegated zone returned from infoblox(%s) does not match requested gslb zone(%s)", findZone.Fqdn, gslbZoneName)
-		return err
-	}
-	return nil
 }
 
 func overrideWithFakeDNS(fakeDNSEnabled bool, server string) (ns string) {

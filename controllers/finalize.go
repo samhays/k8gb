@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+
 	"github.com/AbsaOSS/k8gb/controllers/providers/infoblox"
 
 	"github.com/AbsaOSS/k8gb/controllers/depresolver"
@@ -36,51 +37,11 @@ func (r *GslbReconciler) finalizeGslb(gslb *k8gbv1beta1.Gslb) error {
 	}
 
 	if r.Config.EdgeDNSType == depresolver.DNSTypeInfoblox {
-		provider, err := infoblox.NewInfoblox(r.Config,gslb)
+		provider, err := infoblox.NewInfoblox(r.Config, gslb, r.Client)
 		if err != nil {
 			return err
 		}
 		return provider.Finalize()
-		//
-		//objMgr, err := infobloxConnection(r.Config)
-		//if err != nil {
-		//	return err
-		//}
-		//findZone, err := objMgr.GetZoneDelegated(r.Config.DNSZone)
-		//if err != nil {
-		//	return err
-		//}
-		//
-		//if findZone != nil {
-		//	err = checkZoneDelegated(findZone, r.Config.DNSZone)
-		//	if err != nil {
-		//		return err
-		//	}
-		//	if len(findZone.Ref) > 0 {
-		//		log.Info(fmt.Sprintf("Deleting delegated zone(%s)...", r.Config.DNSZone))
-		//		_, err := objMgr.DeleteZoneDelegated(findZone.Ref)
-		//		if err != nil {
-		//			return err
-		//		}
-		//	}
-		//}
-		//
-		//heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", gslb.Name, r.Config.ClusterGeoTag, r.Config.EdgeDNSZone)
-		//findTXT, err := objMgr.GetTXTRecord(heartbeatTXTName)
-		//if err != nil {
-		//	return err
-		//}
-		//
-		//if findTXT != nil {
-		//	if len(findTXT.Ref) > 0 {
-		//		log.Info(fmt.Sprintf("Deleting split brain TXT record(%s)...", heartbeatTXTName))
-		//		_, err := objMgr.DeleteTXTRecord(findTXT.Ref)
-		//		if err != nil {
-		//			return err
-		//		}
-		//
-		//	}
-		//}
 	}
 
 	log.Info("Successfully finalized Gslb")

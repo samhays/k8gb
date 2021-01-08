@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AbsaOSS/k8gb/controllers/providers/ns1"
+
 	"github.com/AbsaOSS/k8gb/controllers/providers/infoblox"
 
 	"github.com/AbsaOSS/k8gb/controllers/depresolver"
@@ -373,7 +375,11 @@ func (r *GslbReconciler) configureZoneDelegation(gslb *k8gbv1beta1.Gslb) (*recon
 	case depresolver.DNSTypeRoute53:
 		return r.createZoneDelegationRecordsForExternalDNS(gslb, "route53")
 	case depresolver.DNSTypeNS1:
-		return r.createZoneDelegationRecordsForExternalDNS(gslb, "ns1")
+		provider, err := ns1.NewNs1(r.Config, gslb, r.Client)
+		if err != nil {
+			return nil, err
+		}
+		return provider.ConfigureZoneDelegation()
 	case depresolver.DNSTypeInfoblox:
 		provider, err := infoblox.NewInfoblox(r.Config, gslb, r.Client)
 		if err != nil {

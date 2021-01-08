@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	providerName          = "NS1"
+	providerName          = "ns1"
 	coreDNSExtServiceName = "k8gb-coredns-lb"
 )
 
@@ -95,11 +95,13 @@ func (n *Ns1) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 	return nil, nil
 }
 
+// TODO: missing finalizer code in original
 func (n *Ns1) Finalize() (err error) {
 	log.Info("Successfully finalized Gslb")
 	return
 }
 
+// TODO: reuse
 func (n *Ns1) nsServerNameExt() []string {
 	dnsZoneIntoNS := strings.ReplaceAll(n.config.DNSZone, ".", "-")
 	var extNSServers []string
@@ -113,6 +115,7 @@ func (n *Ns1) nsServerNameExt() []string {
 	return extNSServers
 }
 
+// TODO: reuse
 func (n *Ns1) nsServerName() string {
 	dnsZoneIntoNS := strings.ReplaceAll(n.config.DNSZone, ".", "-")
 	return fmt.Sprintf("gslb-ns-%s-%s.%s",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/AbsaOSS/k8gb/controllers/providers/infoblox"
 	"sort"
 	"strconv"
 	"strings"
@@ -445,81 +446,87 @@ func (r *GslbReconciler) configureZoneDelegation(gslb *k8gbv1beta1.Gslb) (*recon
 	case depresolver.DNSTypeNS1:
 		return r.createZoneDelegationRecordsForExternalDNS(gslb, "ns1")
 	case depresolver.DNSTypeInfoblox:
-		objMgr, err := infobloxConnection(r.Config)
+		provider, err := infoblox.NewInfoblox(r.Config,gslb)
 		if err != nil {
-			return &reconcile.Result{}, err
+			return nil, err
 		}
-		addresses, err := r.getGslbIngressIPs(gslb)
-		if err != nil {
-			return &reconcile.Result{}, err
-		}
-		var delegateTo []ibclient.NameServer
-
-		for _, address := range addresses {
-			nameServer := ibclient.NameServer{Address: address, Name: r.nsServerName()}
-			delegateTo = append(delegateTo, nameServer)
-		}
-
-		findZone, err := objMgr.GetZoneDelegated(r.Config.DNSZone)
-		if err != nil {
-			return &reconcile.Result{}, err
-		}
-
-		if findZone != nil {
-			err = checkZoneDelegated(findZone, r.Config.DNSZone)
-			if err != nil {
-				return &reconcile.Result{}, err
-			}
-			if len(findZone.Ref) > 0 {
-
-				// Drop own records for straight away update
-				existingDelegateTo := filterOutDelegateTo(findZone.DelegateTo, r.nsServerName())
-				existingDelegateTo = append(existingDelegateTo, delegateTo...)
-
-				// Drop external records if they are stale
-				extClusters := getExternalClusterHeartbeatFQDNs(gslb, r.Config)
-				for _, extCluster := range extClusters {
-					err = checkAliveFromTXT(extCluster, r.Config, time.Second*time.Duration(gslb.Spec.Strategy.SplitBrainThresholdSeconds))
-					if err != nil {
-						log.Error(err, "got the error from TXT based checkAlive")
-						log.Info(fmt.Sprintf("External cluster (%s) doesn't look alive, filtering it out from delegated zone configuration...", extCluster))
-						existingDelegateTo = filterOutDelegateTo(existingDelegateTo, extCluster)
-					}
-				}
-				log.Info(fmt.Sprintf("Updating delegated zone(%s) with the server list(%v)", r.Config.DNSZone, existingDelegateTo))
-
-				_, err = objMgr.UpdateZoneDelegated(findZone.Ref, existingDelegateTo)
-				if err != nil {
-					return &reconcile.Result{}, err
-				}
-			}
-		} else {
-			log.Info(fmt.Sprintf("Creating delegated zone(%s)...", r.Config.DNSZone))
-			_, err = objMgr.CreateZoneDelegated(r.Config.DNSZone, delegateTo)
-			if err != nil {
-				return &reconcile.Result{}, err
-			}
-		}
-
-		edgeTimestamp := fmt.Sprint(time.Now().UTC().Format("2006-01-02T15:04:05"))
-		heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", gslb.Name, r.Config.ClusterGeoTag, r.Config.EdgeDNSZone)
-		heartbeatTXTRecord, err := objMgr.GetTXTRecord(heartbeatTXTName)
-		if err != nil {
-			return &reconcile.Result{}, err
-		}
-		if heartbeatTXTRecord == nil {
-			log.Info(fmt.Sprintf("Creating split brain TXT record(%s)...", heartbeatTXTName))
-			_, err := objMgr.CreateTXTRecord(heartbeatTXTName, edgeTimestamp, gslb.Spec.Strategy.DNSTtlSeconds, "default")
-			if err != nil {
-				return &reconcile.Result{}, err
-			}
-		} else {
-			log.Info(fmt.Sprintf("Updating split brain TXT record(%s)...", heartbeatTXTName))
-			_, err := objMgr.UpdateTXTRecord(heartbeatTXTName, edgeTimestamp)
-			if err != nil {
-				return &reconcile.Result{}, err
-			}
-		}
+		return provider.ConfigureZoneDelegation()
+		//
+		//objMgr, err := infobloxConnection(r.Config)
+		//if err != nil {
+		//	return &reconcile.Result{}, err
+		//}
+		//addresses, err := r.getGslbIngressIPs(gslb)
+		//if err != nil {
+		//	return &reconcile.Result{}, err
+		//}
+		//var delegateTo []ibclient.NameServer
+		//
+		//for _, address := range addresses {
+		//	nameServer := ibclient.NameServer{Address: address, Name: r.nsServerName()}
+		//	delegateTo = append(delegateTo, nameServer)
+		//}
+		//
+		//findZone, err := objMgr.GetZoneDelegated(r.Config.DNSZone)
+		//if err != nil {
+		//	return &reconcile.Result{}, err
+		//}
+		//
+		//if findZone != nil {
+		//	err = checkZoneDelegated(findZone, r.Config.DNSZone)
+		//	if err != nil {
+		//		return &reconcile.Result{}, err
+		//	}
+		//	if len(findZone.Ref) > 0 {
+		//
+		//		// Drop own records for straight away update
+		//		existingDelegateTo := filterOutDelegateTo(findZone.DelegateTo, r.nsServerName())
+		//		existingDelegateTo = append(existingDelegateTo, delegateTo...)
+		//
+		//		// Drop external records if they are stale
+		//		extClusters := getExternalClusterHeartbeatFQDNs(gslb, r.Config)
+		//		for _, extCluster := range extClusters {
+		//			err = checkAliveFromTXT(extCluster, r.Config, time.Second*time.Duration(gslb.Spec.Strategy.SplitBrainThresholdSeconds))
+		//			if err != nil {
+		//				log.Error(err, "got the error from TXT based checkAlive")
+		//				log.Info(fmt.Sprintf("External cluster (%s) doesn't look alive, filtering it out from delegated zone configuration...", extCluster))
+		//				existingDelegateTo = filterOutDelegateTo(existingDelegateTo, extCluster)
+		//			}
+		//		}
+		//		log.Info(fmt.Sprintf("Updating delegated zone(%s) with the server list(%v)", r.Config.DNSZone, existingDelegateTo))
+		//
+		//		_, err = objMgr.UpdateZoneDelegated(findZone.Ref, existingDelegateTo)
+		//		if err != nil {
+		//			return &reconcile.Result{}, err
+		//		}
+		//	}
+		//} else {
+		//	log.Info(fmt.Sprintf("Creating delegated zone(%s)...", r.Config.DNSZone))
+		//	_, err = objMgr.CreateZoneDelegated(r.Config.DNSZone, delegateTo)
+		//	if err != nil {
+		//		return &reconcile.Result{}, err
+		//	}
+		//}
+		//
+		//edgeTimestamp := fmt.Sprint(time.Now().UTC().Format("2006-01-02T15:04:05"))
+		//heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", gslb.Name, r.Config.ClusterGeoTag, r.Config.EdgeDNSZone)
+		//heartbeatTXTRecord, err := objMgr.GetTXTRecord(heartbeatTXTName)
+		//if err != nil {
+		//	return &reconcile.Result{}, err
+		//}
+		//if heartbeatTXTRecord == nil {
+		//	log.Info(fmt.Sprintf("Creating split brain TXT record(%s)...", heartbeatTXTName))
+		//	_, err := objMgr.CreateTXTRecord(heartbeatTXTName, edgeTimestamp, gslb.Spec.Strategy.DNSTtlSeconds, "default")
+		//	if err != nil {
+		//		return &reconcile.Result{}, err
+		//	}
+		//} else {
+		//	log.Info(fmt.Sprintf("Updating split brain TXT record(%s)...", heartbeatTXTName))
+		//	_, err := objMgr.UpdateTXTRecord(heartbeatTXTName, edgeTimestamp)
+		//	if err != nil {
+		//		return &reconcile.Result{}, err
+		//	}
+		//}
 	case depresolver.DNSTypeNoEdgeDNS:
 		return nil, nil
 	}

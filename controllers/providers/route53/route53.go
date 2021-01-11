@@ -54,12 +54,13 @@ func NewRoute53(config *depresolver.Config, gslb *k8gbv1beta1.Gslb, client clien
 	return
 }
 
+//TODO: reuse
 func (n *Route53) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 	ttl := externaldns.TTL(n.gslb.Spec.Strategy.DNSTtlSeconds)
 	log.Info(fmt.Sprintf("Creating/Updating DNSEndpoint CRDs for %s...", providerName))
 	var NSServerList []string
 	NSServerList = append(NSServerList, n.nsServerName())
-	NSServerList = append(NSServerList, n.nsServerNameExt()...)
+	NSServerList = append(NSServerList, utils.NsServerNameExt(n.config.DNSZone, n.config.EdgeDNSZone, n.config.ExtClustersGeoTags)...)
 	sort.Strings(NSServerList)
 	NSServerIPs, err := n.coreDNSExposedIPs()
 	if err != nil {
@@ -111,20 +112,6 @@ func (n *Route53) Finalize() (err error) {
 		return err
 	}
 	return err
-}
-
-// TODO: reuse
-func (n *Route53) nsServerNameExt() []string {
-	dnsZoneIntoNS := strings.ReplaceAll(n.config.DNSZone, ".", "-")
-	var extNSServers []string
-	for _, clusterGeoTag := range n.config.ExtClustersGeoTags {
-		extNSServers = append(extNSServers,
-			fmt.Sprintf("gslb-ns-%s-%s.%s",
-				dnsZoneIntoNS,
-				clusterGeoTag,
-				n.config.EdgeDNSZone))
-	}
-	return extNSServers
 }
 
 // TODO: reuse

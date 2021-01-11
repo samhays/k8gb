@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/AbsaOSS/k8gb/controllers/internal/utils"
 	"strings"
 	"time"
+
+	"github.com/AbsaOSS/k8gb/controllers/internal/utils"
 
 	"github.com/AbsaOSS/k8gb/controllers/providers"
 	"github.com/AbsaOSS/k8gb/controllers/providers/route53"
@@ -59,7 +60,7 @@ func (r *GslbReconciler) getGslbIngressIPs(gslb *k8gbv1beta1.Gslb) ([]string, er
 		if len(ip.Hostname) > 0 {
 			IPs, err := utils.Dig(r.Config.EdgeDNSServer, ip.Hostname)
 			if err != nil {
-				log.Info("can't dig %s; %s",r.Config.EdgeDNSServer, err.Error())
+				log.Info("can't dig %s; %s", r.Config.EdgeDNSServer, err.Error())
 				return nil, err
 			}
 			gslbIngressIPs = append(gslbIngressIPs, IPs...)
@@ -78,8 +79,7 @@ func getExternalClusterHeartbeatFQDNs(gslb *k8gbv1beta1.Gslb, config *depresolve
 
 func (r *GslbReconciler) getExternalTargets(host string) ([]string, error) {
 
-	extGslbClusters := r.nsServerNameExt()
-
+	extGslbClusters := utils.NsServerNameExt(r.Config.DNSZone, r.Config.EdgeDNSZone, r.Config.ExtClustersGeoTags)
 	var targets []string
 
 	for _, cluster := range extGslbClusters {
@@ -207,21 +207,6 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 	return dnsEndpoint, err
 }
 
-func (r *GslbReconciler) nsServerNameExt() []string {
-
-	dnsZoneIntoNS := strings.ReplaceAll(r.Config.DNSZone, ".", "-")
-	var extNSServers []string
-	for _, clusterGeoTag := range r.Config.ExtClustersGeoTags {
-		extNSServers = append(extNSServers,
-			fmt.Sprintf("gslb-ns-%s-%s.%s",
-				dnsZoneIntoNS,
-				clusterGeoTag,
-				r.Config.EdgeDNSZone))
-	}
-
-	return extNSServers
-}
-
 func checkAliveFromTXT(fqdn string, config *depresolver.Config, splitBrainThreshold time.Duration) error {
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeTXT)
@@ -272,7 +257,6 @@ func filterOutDelegateTo(delegateTo []ibclient.NameServer, fqdn string) []ibclie
 	}
 	return delegateTo
 }
-
 
 func (r *GslbReconciler) coreDNSExposedIPs() ([]string, error) {
 	coreDNSService := &corev1.Service{}

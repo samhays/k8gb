@@ -59,7 +59,7 @@ func (n *Ns1) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 	log.Info(fmt.Sprintf("Creating/Updating DNSEndpoint CRDs for %s...", providerName))
 	var NSServerList []string
 	NSServerList = append(NSServerList, n.nsServerName())
-	NSServerList = append(NSServerList, n.nsServerNameExt()...)
+	NSServerList = append(NSServerList, utils.NsServerNameExt(n.config.DNSZone, n.config.EdgeDNSZone, n.config.ExtClustersGeoTags)...)
 	sort.Strings(NSServerList)
 	NSServerIPs, err := n.coreDNSExposedIPs()
 	if err != nil {
@@ -99,20 +99,6 @@ func (n *Ns1) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 func (n *Ns1) Finalize() (err error) {
 	log.Info("Successfully finalized Gslb")
 	return
-}
-
-// TODO: reuse
-func (n *Ns1) nsServerNameExt() []string {
-	dnsZoneIntoNS := strings.ReplaceAll(n.config.DNSZone, ".", "-")
-	var extNSServers []string
-	for _, clusterGeoTag := range n.config.ExtClustersGeoTags {
-		extNSServers = append(extNSServers,
-			fmt.Sprintf("gslb-ns-%s-%s.%s",
-				dnsZoneIntoNS,
-				clusterGeoTag,
-				n.config.EdgeDNSZone))
-	}
-	return extNSServers
 }
 
 // TODO: reuse

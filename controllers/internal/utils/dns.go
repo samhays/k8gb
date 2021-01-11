@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/lixiangzhong/dnsutil"
 )
@@ -29,4 +30,18 @@ func Dig(edgeDNSServer, fqdn string) ([]string, error) {
 	}
 	sort.Strings(IPs)
 	return IPs, nil
+}
+
+// NsServerNameExt retrieves list of external GSLB clusters
+func NsServerNameExt(dnsZone, edgeDNSZone string, extClusterGeoTags []string) []string {
+	dnsZoneIntoNS := strings.ReplaceAll(dnsZone, ".", "-")
+	var extNSServers []string
+	for _, clusterGeoTag := range extClusterGeoTags {
+		extNSServers = append(extNSServers,
+			fmt.Sprintf("gslb-ns-%s-%s.%s",
+				dnsZoneIntoNS,
+				clusterGeoTag,
+				edgeDNSZone))
+	}
+	return extNSServers
 }

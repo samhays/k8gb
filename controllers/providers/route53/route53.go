@@ -2,15 +2,12 @@ package route53
 
 import (
 	"context"
-	"encoding/json"
-	coreerrors "errors"
 	"fmt"
 	"os"
 
 	k8gbv1beta1 "github.com/AbsaOSS/k8gb/api/v1beta1"
 	"github.com/AbsaOSS/k8gb/controllers/depresolver"
 	"github.com/AbsaOSS/k8gb/controllers/internal/utils"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -55,14 +52,14 @@ func NewRoute53(config *depresolver.Config, gslb *k8gbv1beta1.Gslb, client clien
 }
 
 //TODO: reuse
-func (n *Route53) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
-	ttl := externaldns.TTL(n.gslb.Spec.Strategy.DNSTtlSeconds)
+func (p *Route53) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
+	ttl := externaldns.TTL(p.gslb.Spec.Strategy.DNSTtlSeconds)
 	log.Info(fmt.Sprintf("Creating/Updating DNSEndpoint CRDs for %s...", providerName))
 	var NSServerList []string
-	NSServerList = append(NSServerList, n.nsServerName())
-	NSServerList = append(NSServerList, utils.NsServerNameExt(n.config.DNSZone, n.config.EdgeDNSZone, n.config.ExtClustersGeoTags)...)
+	NSServerList = append(NSServerList, p.nsServerName())
+	NSServerList = append(NSServerList, utils.NsServerNameExt(p.config.DNSZone, p.config.EdgeDNSZone, p.config.ExtClustersGeoTags)...)
 	sort.Strings(NSServerList)
-	NSServerIPs, err := n.coreDNSExposedIPs()
+	NSServerIPs, err := utils.CoreDNSExposedIPs(p.client, p.config.EdgeDNSServer, k8gbNamespace, coreDNSExtServiceName)
 	if err != nil {
 		return &reconcile.Result{}, err
 	}
@@ -75,13 +72,13 @@ func (n *Route53) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 		Spec: externaldns.DNSEndpointSpec{
 			Endpoints: []*externaldns.Endpoint{
 				{
-					DNSName:    n.config.DNSZone,
+					DNSName:    p.config.DNSZone,
 					RecordTTL:  ttl,
 					RecordType: "NS",
 					Targets:    NSServerList,
 				},
 				{
-					DNSName:    n.nsServerName(),
+					DNSName:    p.nsServerName(),
 					RecordTTL:  ttl,
 					RecordType: "A",
 					Targets:    NSServerIPs,
@@ -89,17 +86,17 @@ func (n *Route53) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 			},
 		},
 	}
-	res, err := n.ensureDNSEndpoint(k8gbNamespace, NSRecord)
+	res, err := p.ensureDNSEndpoint(k8gbNamespace, NSRecord)
 	if err != nil {
 		return res, err
 	}
 	return nil, nil
 }
 
-func (n *Route53) Finalize() (err error) {
+func (p *Route53) Finalize() (err error) {
 	log.Info("Removing Zone Delegation entries...")
 	dnsEndpointRoute53 := &externaldns.DNSEndpoint{}
-	err = n.client.Get(context.Background(), client.ObjectKey{Namespace: k8gbNamespace, Name: "k8gb-ns-route53"}, dnsEndpointRoute53)
+	err = p.client.Get(context.Background(), client.ObjectKey{Namespace: k8gbNamespace, Name: "k8gb-ns-route53"}, dnsEndpointRoute53)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Info(fmt.Sprint(err))
@@ -107,7 +104,7 @@ func (n *Route53) Finalize() (err error) {
 		}
 		return err
 	}
-	err = n.client.Delete(context.Background(), dnsEndpointRoute53)
+	err = p.client.Delete(context.Background(), dnsEndpointRoute53)
 	if err != nil {
 		return err
 	}
@@ -115,52 +112,25 @@ func (n *Route53) Finalize() (err error) {
 }
 
 // TODO: reuse
-func (n *Route53) nsServerName() string {
-	dnsZoneIntoNS := strings.ReplaceAll(n.config.DNSZone, ".", "-")
+func (p *Route53) nsServerName() string {
+	dnsZoneIntoNS := strings.ReplaceAll(p.config.DNSZone, ".", "-")
 	return fmt.Sprintf("gslb-ns-%s-%s.%s",
 		dnsZoneIntoNS,
-		n.config.ClusterGeoTag,
-		n.config.EdgeDNSZone)
+		p.config.ClusterGeoTag,
+		p.config.EdgeDNSZone)
 }
 
-func (n *Route53) coreDNSExposedIPs() ([]string, error) {
-	coreDNSService := &corev1.Service{}
-
-	err := n.client.Get(context.TODO(), types.NamespacedName{Namespace: k8gbNamespace, Name: coreDNSExtServiceName}, coreDNSService)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info(fmt.Sprintf("Can't find %s service", coreDNSExtServiceName))
-		}
-		return nil, err
-	}
-	var lbHostname string
-	if len(coreDNSService.Status.LoadBalancer.Ingress) > 0 {
-		lbHostname = coreDNSService.Status.LoadBalancer.Ingress[0].Hostname
-	} else {
-		errMessage := fmt.Sprintf("no Ingress LoadBalancer entries found for %s serice", coreDNSExtServiceName)
-		log.Info(errMessage)
-		err := coreerrors.New(errMessage)
-		return nil, err
-	}
-	IPs, err := utils.Dig(n.config.EdgeDNSServer, lbHostname)
-	if err != nil {
-		log.Info(fmt.Sprintf("Can't dig k8gb-coredns-lb service loadbalancer fqdn %s", lbHostname))
-		return nil, err
-	}
-	return IPs, nil
-}
-
-func (n *Route53) ensureDNSEndpoint(namespace string, i *externaldns.DNSEndpoint) (*reconcile.Result, error) {
+func (p *Route53) ensureDNSEndpoint(namespace string, i *externaldns.DNSEndpoint) (*reconcile.Result, error) {
 	found := &externaldns.DNSEndpoint{}
-	err := n.client.Get(context.TODO(), types.NamespacedName{
+	err := p.client.Get(context.TODO(), types.NamespacedName{
 		Name:      i.Name,
 		Namespace: namespace,
 	}, found)
 	if err != nil && errors.IsNotFound(err) {
 
 		// Create the DNSEndpoint
-		log.Info(fmt.Sprintf("Creating a new DNSEndpoint:\n %s", prettyPrint(i)))
-		err = n.client.Create(context.TODO(), i)
+		log.Info(fmt.Sprintf("Creating a new DNSEndpoint:\n %s", utils.PrettyPrint(i)))
+		err = p.client.Create(context.TODO(), i)
 
 		if err != nil {
 			// Creation failed
@@ -177,7 +147,7 @@ func (n *Route53) ensureDNSEndpoint(namespace string, i *externaldns.DNSEndpoint
 
 	// Update existing object with new spec
 	found.Spec = i.Spec
-	err = n.client.Update(context.TODO(), found)
+	err = p.client.Update(context.TODO(), found)
 
 	if err != nil {
 		// Update failed
@@ -185,12 +155,4 @@ func (n *Route53) ensureDNSEndpoint(namespace string, i *externaldns.DNSEndpoint
 		return &reconcile.Result{}, err
 	}
 	return nil, nil
-}
-
-func prettyPrint(s interface{}) string {
-	prettyStruct, err := json.MarshalIndent(s, "", "\t")
-	if err != nil {
-		fmt.Println("can't convert struct to json")
-	}
-	return string(prettyStruct)
 }

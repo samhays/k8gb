@@ -1,7 +1,6 @@
 package infoblox
 
 import (
-	"context"
 	coreerrors "errors"
 	"fmt"
 	"strconv"
@@ -12,13 +11,11 @@ import (
 	"github.com/AbsaOSS/k8gb/controllers/internal/utils"
 	ibclient "github.com/infobloxopen/infoblox-go-client"
 	"github.com/miekg/dns"
-	"k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	k8gbv1beta1 "github.com/AbsaOSS/k8gb/api/v1beta1"
-	types "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -45,49 +42,49 @@ func NewInfoblox(config *depresolver.Config, gslb *k8gbv1beta1.Gslb, client clie
 	return
 }
 
-func (i *Infoblox) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
-	objMgr, err := i.infobloxConnection()
+func (p *Infoblox) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
+	objMgr, err := p.infobloxConnection()
 	if err != nil {
 		return &reconcile.Result{}, err
 	}
-	addresses, err := i.getGslbIngressIPs(i.gslb)
+	addresses, err := utils.GetGslbIngressIPs(p.gslb, p.client, p.config.EdgeDNSServer)
 	if err != nil {
 		return &reconcile.Result{}, err
 	}
 	var delegateTo []ibclient.NameServer
 
 	for _, address := range addresses {
-		nameServer := ibclient.NameServer{Address: address, Name: i.nsServerName()}
+		nameServer := ibclient.NameServer{Address: address, Name: p.nsServerName()}
 		delegateTo = append(delegateTo, nameServer)
 	}
 
-	findZone, err := objMgr.GetZoneDelegated(i.config.DNSZone)
+	findZone, err := objMgr.GetZoneDelegated(p.config.DNSZone)
 	if err != nil {
 		return &reconcile.Result{}, err
 	}
 
 	if findZone != nil {
-		err = i.checkZoneDelegated(findZone, i.config.DNSZone)
+		err = p.checkZoneDelegated(findZone, p.config.DNSZone)
 		if err != nil {
 			return &reconcile.Result{}, err
 		}
 		if len(findZone.Ref) > 0 {
 
 			// Drop own records for straight away update
-			existingDelegateTo := i.filterOutDelegateTo(findZone.DelegateTo, i.nsServerName())
+			existingDelegateTo := p.filterOutDelegateTo(findZone.DelegateTo, p.nsServerName())
 			existingDelegateTo = append(existingDelegateTo, delegateTo...)
 
 			// Drop external records if they are stale
-			extClusters := i.getExternalClusterHeartbeatFQDNs()
+			extClusters := p.getExternalClusterHeartbeatFQDNs()
 			for _, extCluster := range extClusters {
-				err = i.checkAliveFromTXT(extCluster, time.Second*time.Duration(i.gslb.Spec.Strategy.SplitBrainThresholdSeconds))
+				err = p.checkAliveFromTXT(extCluster, time.Second*time.Duration(p.gslb.Spec.Strategy.SplitBrainThresholdSeconds))
 				if err != nil {
 					log.Error(err, "got the error from TXT based checkAlive")
 					log.Info(fmt.Sprintf("External cluster (%s) doesn't look alive, filtering it out from delegated zone configuration...", extCluster))
-					existingDelegateTo = i.filterOutDelegateTo(existingDelegateTo, extCluster)
+					existingDelegateTo = p.filterOutDelegateTo(existingDelegateTo, extCluster)
 				}
 			}
-			log.Info(fmt.Sprintf("Updating delegated zone(%s) with the server list(%v)", i.config.DNSZone, existingDelegateTo))
+			log.Info(fmt.Sprintf("Updating delegated zone(%s) with the server list(%v)", p.config.DNSZone, existingDelegateTo))
 
 			_, err = objMgr.UpdateZoneDelegated(findZone.Ref, existingDelegateTo)
 			if err != nil {
@@ -95,22 +92,22 @@ func (i *Infoblox) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 			}
 		}
 	} else {
-		log.Info(fmt.Sprintf("Creating delegated zone(%s)...", i.config.DNSZone))
-		_, err = objMgr.CreateZoneDelegated(i.config.DNSZone, delegateTo)
+		log.Info(fmt.Sprintf("Creating delegated zone(%s)...", p.config.DNSZone))
+		_, err = objMgr.CreateZoneDelegated(p.config.DNSZone, delegateTo)
 		if err != nil {
 			return &reconcile.Result{}, err
 		}
 	}
 
 	edgeTimestamp := fmt.Sprint(time.Now().UTC().Format("2006-01-02T15:04:05"))
-	heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", i.gslb.Name, i.config.ClusterGeoTag, i.config.EdgeDNSZone)
+	heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", p.gslb.Name, p.config.ClusterGeoTag, p.config.EdgeDNSZone)
 	heartbeatTXTRecord, err := objMgr.GetTXTRecord(heartbeatTXTName)
 	if err != nil {
 		return &reconcile.Result{}, err
 	}
 	if heartbeatTXTRecord == nil {
 		log.Info(fmt.Sprintf("Creating split brain TXT record(%s)...", heartbeatTXTName))
-		_, err := objMgr.CreateTXTRecord(heartbeatTXTName, edgeTimestamp, i.gslb.Spec.Strategy.DNSTtlSeconds, "default")
+		_, err := objMgr.CreateTXTRecord(heartbeatTXTName, edgeTimestamp, p.gslb.Spec.Strategy.DNSTtlSeconds, "default")
 		if err != nil {
 			return &reconcile.Result{}, err
 		}
@@ -124,23 +121,23 @@ func (i *Infoblox) ConfigureZoneDelegation() (r *reconcile.Result, err error) {
 	return nil, coreerrors.New("unhandled DNS type")
 }
 
-func (i *Infoblox) Finalize() (err error) {
-	objMgr, err := i.infobloxConnection()
+func (p *Infoblox) Finalize() (err error) {
+	objMgr, err := p.infobloxConnection()
 	if err != nil {
 		return err
 	}
-	findZone, err := objMgr.GetZoneDelegated(i.config.DNSZone)
+	findZone, err := objMgr.GetZoneDelegated(p.config.DNSZone)
 	if err != nil {
 		return err
 	}
 
 	if findZone != nil {
-		err = i.checkZoneDelegated(findZone, i.config.DNSZone)
+		err = p.checkZoneDelegated(findZone, p.config.DNSZone)
 		if err != nil {
 			return err
 		}
 		if len(findZone.Ref) > 0 {
-			log.Info(fmt.Sprintf("Deleting delegated zone(%s)...", i.config.DNSZone))
+			log.Info(fmt.Sprintf("Deleting delegated zone(%s)...", p.config.DNSZone))
 			_, err := objMgr.DeleteZoneDelegated(findZone.Ref)
 			if err != nil {
 				return err
@@ -148,7 +145,7 @@ func (i *Infoblox) Finalize() (err error) {
 		}
 	}
 
-	heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", i.gslb.Name, i.config.ClusterGeoTag, i.config.EdgeDNSZone)
+	heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", p.gslb.Name, p.config.ClusterGeoTag, p.config.EdgeDNSZone)
 	findTXT, err := objMgr.GetTXTRecord(heartbeatTXTName)
 	if err != nil {
 		return err
@@ -166,13 +163,13 @@ func (i *Infoblox) Finalize() (err error) {
 	return err
 }
 
-func (i *Infoblox) infobloxConnection() (*ibclient.ObjectManager, error) {
+func (p *Infoblox) infobloxConnection() (*ibclient.ObjectManager, error) {
 	hostConfig := ibclient.HostConfig{
-		Host:     i.config.Infoblox.Host,
-		Version:  i.config.Infoblox.Version,
-		Port:     strconv.Itoa(i.config.Infoblox.Port),
-		Username: i.config.Infoblox.Username,
-		Password: i.config.Infoblox.Password,
+		Host:     p.config.Infoblox.Host,
+		Version:  p.config.Infoblox.Version,
+		Port:     strconv.Itoa(p.config.Infoblox.Port),
+		Username: p.config.Infoblox.Username,
+		Password: p.config.Infoblox.Password,
 	}
 	transportConfig := ibclient.NewTransportConfig("false", 20, 10)
 	requestBuilder := &ibclient.WapiRequestBuilder{}
@@ -180,7 +177,7 @@ func (i *Infoblox) infobloxConnection() (*ibclient.ObjectManager, error) {
 
 	var objMgr *ibclient.ObjectManager
 
-	if i.config.Override.FakeInfobloxEnabled {
+	if p.config.Override.FakeInfobloxEnabled {
 		fqdn := "fakezone.example.com"
 		fakeRefReturn := "zone_delegated/ZG5zLnpvbmUkLl9kZWZhdWx0LnphLmNvLmFic2EuY2Fhcy5vaG15Z2xiLmdzbGJpYmNsaWVudA:fakezone.example.com/default"
 		ohmyFakeConnector := &fakeInfobloxConnector{
@@ -205,50 +202,16 @@ func (i *Infoblox) infobloxConnection() (*ibclient.ObjectManager, error) {
 	return objMgr, nil
 }
 
-func (i *Infoblox) getGslbIngressIPs(gslb *k8gbv1beta1.Gslb) ([]string, error) {
-	nn := types.NamespacedName{
-		Name:      gslb.Name,
-		Namespace: gslb.Namespace,
-	}
-
-	gslbIngress := &v1beta1.Ingress{}
-
-	err := i.client.Get(context.TODO(), nn, gslbIngress)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info(fmt.Sprintf("Can't find gslb Ingress: %s", gslb.Name))
-		}
-		return nil, err
-	}
-
-	var gslbIngressIPs []string
-
-	for _, ip := range gslbIngress.Status.LoadBalancer.Ingress {
-		if len(ip.IP) > 0 {
-			gslbIngressIPs = append(gslbIngressIPs, ip.IP)
-		}
-		if len(ip.Hostname) > 0 {
-			IPs, err := utils.Dig(i.config.EdgeDNSServer, ip.Hostname)
-			if err != nil {
-				log.Info(err.Error())
-				return nil, err
-			}
-			gslbIngressIPs = append(gslbIngressIPs, IPs...)
-		}
-	}
-
-	return gslbIngressIPs, nil
-}
-
-func (i *Infoblox) nsServerName() string {
-	dnsZoneIntoNS := strings.ReplaceAll(i.config.DNSZone, ".", "-")
+//TODO: refactor into common
+func (p *Infoblox) nsServerName() string {
+	dnsZoneIntoNS := strings.ReplaceAll(p.config.DNSZone, ".", "-")
 	return fmt.Sprintf("gslb-ns-%s-%s.%s",
 		dnsZoneIntoNS,
-		i.config.ClusterGeoTag,
-		i.config.EdgeDNSZone)
+		p.config.ClusterGeoTag,
+		p.config.EdgeDNSZone)
 }
 
-func (i *Infoblox) checkZoneDelegated(findZone *ibclient.ZoneDelegated, gslbZoneName string) error {
+func (p *Infoblox) checkZoneDelegated(findZone *ibclient.ZoneDelegated, gslbZoneName string) error {
 	if findZone.Fqdn != gslbZoneName {
 		err := fmt.Errorf("delegated zone returned from infoblox(%s) does not match requested gslb zone(%s)", findZone.Fqdn, gslbZoneName)
 		return err
@@ -256,7 +219,7 @@ func (i *Infoblox) checkZoneDelegated(findZone *ibclient.ZoneDelegated, gslbZone
 	return nil
 }
 
-func (i *Infoblox) filterOutDelegateTo(delegateTo []ibclient.NameServer, fqdn string) []ibclient.NameServer {
+func (p *Infoblox) filterOutDelegateTo(delegateTo []ibclient.NameServer, fqdn string) []ibclient.NameServer {
 	for i := 0; i < len(delegateTo); i++ {
 		if delegateTo[i].Name == fqdn {
 			delegateTo = append(delegateTo[:i], delegateTo[i+1:]...)
@@ -266,17 +229,17 @@ func (i *Infoblox) filterOutDelegateTo(delegateTo []ibclient.NameServer, fqdn st
 	return delegateTo
 }
 
-func (i *Infoblox) getExternalClusterHeartbeatFQDNs() (extGslbClusters []string) {
-	for _, geoTag := range i.config.ExtClustersGeoTags {
-		extGslbClusters = append(extGslbClusters, fmt.Sprintf("%s-heartbeat-%s.%s", i.gslb.Name, geoTag, i.config.EdgeDNSZone))
+func (p *Infoblox) getExternalClusterHeartbeatFQDNs() (extGslbClusters []string) {
+	for _, geoTag := range p.config.ExtClustersGeoTags {
+		extGslbClusters = append(extGslbClusters, fmt.Sprintf("%s-heartbeat-%s.%s", p.gslb.Name, geoTag, p.config.EdgeDNSZone))
 	}
 	return
 }
 
-func (i *Infoblox) checkAliveFromTXT(fqdn string, splitBrainThreshold time.Duration) error {
+func (p *Infoblox) checkAliveFromTXT(fqdn string, splitBrainThreshold time.Duration) error {
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeTXT)
-	ns := overrideWithFakeDNS(i.config.Override.FakeDNSEnabled, i.config.EdgeDNSServer)
+	ns := utils.OverrideWithFakeDNS(p.config.Override.FakeDNSEnabled, p.config.EdgeDNSServer)
 	txt, err := dns.Exchange(m, ns)
 	if err != nil {
 		log.Info(fmt.Sprintf("Error contacting EdgeDNS server (%s) for TXT split brain record: (%s)", ns, err))
@@ -311,13 +274,4 @@ func (i *Infoblox) checkAliveFromTXT(fqdn string, splitBrainThreshold time.Durat
 		return nil
 	}
 	return errors.NewGone(fmt.Sprintf("Can't find split brain TXT record at EdgeDNS server(%s) and record %s ", ns, fqdn))
-}
-
-func overrideWithFakeDNS(fakeDNSEnabled bool, server string) (ns string) {
-	if fakeDNSEnabled {
-		ns = "127.0.0.1:7753"
-	} else {
-		ns = fmt.Sprintf("%s:53", server)
-	}
-	return
 }

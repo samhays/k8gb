@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -23,8 +22,6 @@ import (
 	k8gbv1beta1 "github.com/AbsaOSS/k8gb/api/v1beta1"
 	ibclient "github.com/infobloxopen/infoblox-go-client"
 	"github.com/miekg/dns"
-	corev1 "k8s.io/api/core/v1"
-	v1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
@@ -34,41 +31,6 @@ import (
 )
 
 const coreDNSExtServiceName = "k8gb-coredns-lb"
-
-func (r *GslbReconciler) getGslbIngressIPs(gslb *k8gbv1beta1.Gslb) ([]string, error) {
-	nn := types.NamespacedName{
-		Name:      gslb.Name,
-		Namespace: gslb.Namespace,
-	}
-
-	gslbIngress := &v1beta1.Ingress{}
-
-	err := r.Get(context.TODO(), nn, gslbIngress)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info(fmt.Sprintf("Can't find gslb Ingress: %s", gslb.Name))
-		}
-		return nil, err
-	}
-
-	var gslbIngressIPs []string
-
-	for _, ip := range gslbIngress.Status.LoadBalancer.Ingress {
-		if len(ip.IP) > 0 {
-			gslbIngressIPs = append(gslbIngressIPs, ip.IP)
-		}
-		if len(ip.Hostname) > 0 {
-			IPs, err := utils.Dig(r.Config.EdgeDNSServer, ip.Hostname)
-			if err != nil {
-				log.Info("can't dig %s; %s", r.Config.EdgeDNSServer, err.Error())
-				return nil, err
-			}
-			gslbIngressIPs = append(gslbIngressIPs, IPs...)
-		}
-	}
-
-	return gslbIngressIPs, nil
-}
 
 func getExternalClusterHeartbeatFQDNs(gslb *k8gbv1beta1.Gslb, config *depresolver.Config) (extGslbClusters []string) {
 	for _, geoTag := range config.ExtClustersGeoTags {
@@ -88,7 +50,7 @@ func (r *GslbReconciler) getExternalTargets(host string) ([]string, error) {
 		host = fmt.Sprintf("localtargets-%s.", host) // Convert to true FQDN with dot at the end. Otherwise dns lib freaks out
 		g.SetQuestion(host, dns.TypeA)
 
-		ns := overrideWithFakeDNS(r.Config.Override.FakeDNSEnabled, cluster)
+		ns := utils.OverrideWithFakeDNS(r.Config.Override.FakeDNSEnabled, cluster)
 
 		a, err := dns.Exchange(g, ns)
 		if err != nil {
@@ -119,7 +81,7 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 		return nil, err
 	}
 
-	localTargets, err := r.getGslbIngressIPs(gslb)
+	localTargets, err := utils.GetGslbIngressIPs(gslb, r, r.Config.EdgeDNSServer)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +172,7 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 func checkAliveFromTXT(fqdn string, config *depresolver.Config, splitBrainThreshold time.Duration) error {
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeTXT)
-	ns := overrideWithFakeDNS(config.Override.FakeDNSEnabled, config.EdgeDNSServer)
+	ns := utils.OverrideWithFakeDNS(config.Override.FakeDNSEnabled, config.EdgeDNSServer)
 	txt, err := dns.Exchange(m, ns)
 	if err != nil {
 		log.Info(fmt.Sprintf("Error contacting EdgeDNS server (%s) for TXT split brain record: (%s)", ns, err))
@@ -258,33 +220,6 @@ func filterOutDelegateTo(delegateTo []ibclient.NameServer, fqdn string) []ibclie
 	return delegateTo
 }
 
-func (r *GslbReconciler) coreDNSExposedIPs() ([]string, error) {
-	coreDNSService := &corev1.Service{}
-
-	err := r.Get(context.TODO(), types.NamespacedName{Namespace: k8gbNamespace, Name: coreDNSExtServiceName}, coreDNSService)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info(fmt.Sprintf("Can't find %s service", coreDNSExtServiceName))
-		}
-		return nil, err
-	}
-	var lbHostname string
-	if len(coreDNSService.Status.LoadBalancer.Ingress) > 0 {
-		lbHostname = coreDNSService.Status.LoadBalancer.Ingress[0].Hostname
-	} else {
-		errMessage := fmt.Sprintf("no Ingress LoadBalancer entries found for %s serice", coreDNSExtServiceName)
-		log.Info(errMessage)
-		err := coreerrors.New(errMessage)
-		return nil, err
-	}
-	IPs, err := utils.Dig(r.Config.EdgeDNSServer, lbHostname)
-	if err != nil {
-		log.Info(fmt.Sprintf("Can't dig k8gb-coredns-lb service loadbalancer fqdn %s", lbHostname))
-		return nil, err
-	}
-	return IPs, nil
-}
-
 func (r *GslbReconciler) configureZoneDelegation(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error) {
 	var provider providers.IDnsProvider
 	var err error
@@ -318,7 +253,7 @@ func (r *GslbReconciler) ensureDNSEndpoint(
 	if err != nil && errors.IsNotFound(err) {
 
 		// Create the DNSEndpoint
-		log.Info(fmt.Sprintf("Creating a new DNSEndpoint:\n %s", prettyPrint(i)))
+		log.Info(fmt.Sprintf("Creating a new DNSEndpoint:\n %s", utils.PrettyPrint(i)))
 		err = r.Create(context.TODO(), i)
 
 		if err != nil {
@@ -345,21 +280,4 @@ func (r *GslbReconciler) ensureDNSEndpoint(
 	}
 
 	return nil, nil
-}
-
-func overrideWithFakeDNS(fakeDNSEnabled bool, server string) (ns string) {
-	if fakeDNSEnabled {
-		ns = "127.0.0.1:7753"
-	} else {
-		ns = fmt.Sprintf("%s:53", server)
-	}
-	return
-}
-
-func prettyPrint(s interface{}) string {
-	prettyStruct, err := json.MarshalIndent(s, "", "\t")
-	if err != nil {
-		fmt.Println("can't convert struct to json")
-	}
-	return string(prettyStruct)
 }

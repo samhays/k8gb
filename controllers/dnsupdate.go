@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"github.com/AbsaOSS/k8gb/controllers/internal/utils"
 	"strings"
 	"time"
 
@@ -21,7 +21,6 @@ import (
 
 	k8gbv1beta1 "github.com/AbsaOSS/k8gb/api/v1beta1"
 	ibclient "github.com/infobloxopen/infoblox-go-client"
-	"github.com/lixiangzhong/dnsutil"
 	"github.com/miekg/dns"
 	corev1 "k8s.io/api/core/v1"
 	v1beta1 "k8s.io/api/extensions/v1beta1"
@@ -58,8 +57,9 @@ func (r *GslbReconciler) getGslbIngressIPs(gslb *k8gbv1beta1.Gslb) ([]string, er
 			gslbIngressIPs = append(gslbIngressIPs, ip.IP)
 		}
 		if len(ip.Hostname) > 0 {
-			IPs, err := Dig(r.Config.EdgeDNSServer, ip.Hostname)
+			IPs, err := utils.Dig(r.Config.EdgeDNSServer, ip.Hostname)
 			if err != nil {
+				log.Info("can't dig %s; %s",r.Config.EdgeDNSServer, err.Error())
 				return nil, err
 			}
 			gslbIngressIPs = append(gslbIngressIPs, IPs...)
@@ -207,14 +207,6 @@ func (r *GslbReconciler) gslbDNSEndpoint(gslb *k8gbv1beta1.Gslb) (*externaldns.D
 	return dnsEndpoint, err
 }
 
-func (r *GslbReconciler) nsServerName() string {
-	dnsZoneIntoNS := strings.ReplaceAll(r.Config.DNSZone, ".", "-")
-	return fmt.Sprintf("gslb-ns-%s-%s.%s",
-		dnsZoneIntoNS,
-		r.Config.ClusterGeoTag,
-		r.Config.EdgeDNSZone)
-}
-
 func (r *GslbReconciler) nsServerNameExt() []string {
 
 	dnsZoneIntoNS := strings.ReplaceAll(r.Config.DNSZone, ".", "-")
@@ -281,29 +273,6 @@ func filterOutDelegateTo(delegateTo []ibclient.NameServer, fqdn string) []ibclie
 	return delegateTo
 }
 
-// Dig digs
-func Dig(edgeDNSServer, fqdn string) ([]string, error) {
-	var dig dnsutil.Dig
-	if edgeDNSServer == "" {
-		return nil, fmt.Errorf("empty edgeDNSServer")
-	}
-	err := dig.SetDNS(edgeDNSServer)
-	if err != nil {
-		log.Info(fmt.Sprintf("Can't set query dns (%s) with error(%s)", edgeDNSServer, err))
-		return nil, err
-	}
-	a, err := dig.A(fqdn)
-	if err != nil {
-		log.Info(fmt.Sprintf("Can't dig fqdn(%s) with error(%s)", fqdn, err))
-		return nil, err
-	}
-	var IPs []string
-	for _, ip := range a {
-		IPs = append(IPs, fmt.Sprint(ip.A))
-	}
-	sort.Strings(IPs)
-	return IPs, nil
-}
 
 func (r *GslbReconciler) coreDNSExposedIPs() ([]string, error) {
 	coreDNSService := &corev1.Service{}
@@ -324,53 +293,12 @@ func (r *GslbReconciler) coreDNSExposedIPs() ([]string, error) {
 		err := coreerrors.New(errMessage)
 		return nil, err
 	}
-	IPs, err := Dig(r.Config.EdgeDNSServer, lbHostname)
+	IPs, err := utils.Dig(r.Config.EdgeDNSServer, lbHostname)
 	if err != nil {
 		log.Info(fmt.Sprintf("Can't dig k8gb-coredns-lb service loadbalancer fqdn %s", lbHostname))
 		return nil, err
 	}
 	return IPs, nil
-}
-
-func (r *GslbReconciler) createZoneDelegationRecordsForExternalDNS(gslb *k8gbv1beta1.Gslb, dnsProvider string) (*reconcile.Result, error) {
-	ttl := externaldns.TTL(gslb.Spec.Strategy.DNSTtlSeconds)
-	log.Info(fmt.Sprintf("Creating/Updating DNSEndpoint CRDs for %s...", dnsProvider))
-	var NSServerList []string
-	NSServerList = append(NSServerList, r.nsServerName())
-	NSServerList = append(NSServerList, r.nsServerNameExt()...)
-	sort.Strings(NSServerList)
-	NSServerIPs, err := r.coreDNSExposedIPs()
-	if err != nil {
-		return &reconcile.Result{}, err
-	}
-	NSRecord := &externaldns.DNSEndpoint{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        fmt.Sprintf("k8gb-ns-%s", dnsProvider),
-			Namespace:   k8gbNamespace,
-			Annotations: map[string]string{"k8gb.absa.oss/dnstype": dnsProvider},
-		},
-		Spec: externaldns.DNSEndpointSpec{
-			Endpoints: []*externaldns.Endpoint{
-				{
-					DNSName:    r.Config.DNSZone,
-					RecordTTL:  ttl,
-					RecordType: "NS",
-					Targets:    NSServerList,
-				},
-				{
-					DNSName:    r.nsServerName(),
-					RecordTTL:  ttl,
-					RecordType: "A",
-					Targets:    NSServerIPs,
-				},
-			},
-		},
-	}
-	res, err := r.ensureDNSEndpoint(k8gbNamespace, NSRecord)
-	if err != nil {
-		return res, err
-	}
-	return nil, nil
 }
 
 func (r *GslbReconciler) configureZoneDelegation(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error) {

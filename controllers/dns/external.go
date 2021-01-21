@@ -14,8 +14,8 @@ import (
 type ExternalDNSType string
 
 const (
-	ExternalDNSTypeNS1     ExternalDNSType = "ns1"
-	ExternalDnsTypeRoute53 ExternalDNSType = " route53"
+// ExternalDNSTypeNS1     ExternalDNSType = "ns1"
+// ExternalDnsTypeRoute53 ExternalDNSType = " route53"
 )
 
 type ExternalDNS struct {

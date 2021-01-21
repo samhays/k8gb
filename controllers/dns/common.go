@@ -22,5 +22,3 @@ func nsServerNameExt(config depresolver.Config) (extNSServers []string) {
 	}
 	return extNSServers
 }
-
-

@@ -8,12 +8,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-
 var predefinedConfig = depresolver.Config{
-	ClusterGeoTag:           "us",
-	DNSZone:                 "example.com",
-	ExtClustersGeoTags:      []string{"uk", "eu"},
-	EdgeDNSZone:             "8.8.8.8",
+	ClusterGeoTag:      "us",
+	DNSZone:            "example.com",
+	ExtClustersGeoTags: []string{"uk", "eu"},
+	EdgeDNSZone:        "8.8.8.8",
 }
 
 func TestNsServerName(t *testing.T) {

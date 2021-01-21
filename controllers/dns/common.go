@@ -12,15 +12,15 @@ func nsServerName(config depresolver.Config) string {
 	return fmt.Sprintf("gslb-ns-%s-%s.%s", dnsZoneIntoNS, config.ClusterGeoTag, config.EdgeDNSZone)
 }
 
-// TODO: refactor with nsServername
-// TODO: tests
-// TODO: maybe to internal folder
-func nsServerNameExt(config depresolver.Config) []string {
+func nsServerNameExt(config depresolver.Config) (extNSServers []string) {
 	dnsZoneIntoNS := strings.ReplaceAll(config.DNSZone, ".", "-")
-	var extNSServers []string
+	extNSServers = []string{}
 	for _, clusterGeoTag := range config.ExtClustersGeoTags {
+
 		extNSServers = append(extNSServers,
 			fmt.Sprintf("gslb-ns-%s-%s.%s", dnsZoneIntoNS, clusterGeoTag, config.EdgeDNSZone))
 	}
 	return extNSServers
 }
+
+

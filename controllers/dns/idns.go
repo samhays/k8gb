@@ -6,6 +6,6 @@ import (
 )
 
 type IDnsProvider interface {
-	HandleZoneDelegation(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error)
+	CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error)
 	Finalize(gslb *k8gbv1beta1.Gslb) error
 }

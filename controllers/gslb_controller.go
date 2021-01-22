@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/AbsaOSS/k8gb/controllers/dns"
 	"time"
 
 	"github.com/AbsaOSS/k8gb/controllers/metrics"
@@ -52,6 +53,8 @@ type GslbReconciler struct {
 	Config      *depresolver.Config
 	DepResolver *depresolver.DependencyResolver
 	Metrics     *metrics.PrometheusMetrics
+	NS1			dns.IDnsProvider
+	Route53     dns.IDnsProvider
 }
 
 const (

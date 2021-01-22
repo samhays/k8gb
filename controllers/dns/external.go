@@ -14,8 +14,8 @@ import (
 type ExternalDNSType string
 
 const (
-// ExternalDNSTypeNS1     ExternalDNSType = "ns1"
-// ExternalDnsTypeRoute53 ExternalDNSType = " route53"
+	ExternalDNSTypeNS1     ExternalDNSType = "ns1"
+	ExternalDnsTypeRoute53 ExternalDNSType = " route53"
 )
 
 type ExternalDNS struct {
@@ -34,7 +34,7 @@ func NewExternalDNS(dnsType ExternalDNSType, config depresolver.Config, assistan
 	}
 }
 
-func (e *ExternalDNS) HandleZoneDelegation(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error) {
+func (e *ExternalDNS) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error) {
 	ttl := externaldns.TTL(gslb.Spec.Strategy.DNSTtlSeconds)
 	// TODO: extract log.Info(fmt.Sprintf("Creating/Updating DNSEndpoint CRDs for %s...", e.dnsType))
 	var NSServerList []string

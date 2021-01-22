@@ -18,6 +18,7 @@ package main
 
 import (
 	"flag"
+	"github.com/AbsaOSS/k8gb/controllers/dns"
 	"os"
 
 	"github.com/AbsaOSS/k8gb/controllers/depresolver"
@@ -101,6 +102,13 @@ func main() {
 		setupLog.Error(err, "register metrics error")
 		os.Exit(1)
 	}
+	//TODO: refactor to factory
+	assistant :=
+		dns.NewGslbAssistant(reconciler.Client,reconciler.Log,reconciler.Config.K8gbNamespace,
+			reconciler.Config.EdgeDNSServer)
+	reconciler.NS1 = dns.NewExternalDNS(dns.ExternalDNSTypeNS1,*reconciler.Config,assistant)
+	reconciler.Route53 = dns.NewExternalDNS(dns.ExternalDnsTypeRoute53,*reconciler.Config,assistant)
+
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Gslb")
 		os.Exit(1)

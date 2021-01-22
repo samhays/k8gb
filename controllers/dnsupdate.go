@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -374,60 +373,12 @@ func (r *GslbReconciler) coreDNSExposedIPs() ([]string, error) {
 	return IPs, nil
 }
 
-func (r *GslbReconciler) createZoneDelegationRecordsForExternalDNS(gslb *k8gbv1beta1.Gslb, dnsProvider string) (*reconcile.Result, error) {
-	ttl := externaldns.TTL(gslb.Spec.Strategy.DNSTtlSeconds)
-	log.Info(fmt.Sprintf("Creating/Updating DNSEndpoint CRDs for %s...", dnsProvider))
-	var NSServerList []string
-	NSServerList = append(NSServerList, r.nsServerName())
-	NSServerList = append(NSServerList, r.nsServerNameExt()...)
-	sort.Strings(NSServerList)
-	var NSServerIPs []string
-	var err error
-	if r.Config.CoreDNSExposed {
-		NSServerIPs, err = r.coreDNSExposedIPs()
-	} else {
-		NSServerIPs, err = r.getGslbIngressIPs(gslb)
-
-	}
-	if err != nil {
-		return &reconcile.Result{}, err
-	}
-	NSRecord := &externaldns.DNSEndpoint{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        fmt.Sprintf("k8gb-ns-%s", dnsProvider),
-			Namespace:   r.Config.K8gbNamespace,
-			Annotations: map[string]string{"k8gb.absa.oss/dnstype": dnsProvider},
-		},
-		Spec: externaldns.DNSEndpointSpec{
-			Endpoints: []*externaldns.Endpoint{
-				{
-					DNSName:    r.Config.DNSZone,
-					RecordTTL:  ttl,
-					RecordType: "NS",
-					Targets:    NSServerList,
-				},
-				{
-					DNSName:    r.nsServerName(),
-					RecordTTL:  ttl,
-					RecordType: "A",
-					Targets:    NSServerIPs,
-				},
-			},
-		},
-	}
-	res, err := r.ensureDNSEndpoint(r.Config.K8gbNamespace, NSRecord)
-	if err != nil {
-		return res, err
-	}
-	return nil, nil
-}
-
 func (r *GslbReconciler) configureZoneDelegation(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error) {
 	switch r.Config.EdgeDNSType {
 	case depresolver.DNSTypeRoute53:
-		return r.createZoneDelegationRecordsForExternalDNS(gslb, "route53")
+		return r.Route53.CreateZoneDelegationForExternalDNS(gslb)
 	case depresolver.DNSTypeNS1:
-		return r.createZoneDelegationRecordsForExternalDNS(gslb, "ns1")
+		return r.NS1.CreateZoneDelegationForExternalDNS(gslb)
 	case depresolver.DNSTypeInfoblox:
 		objMgr, err := infobloxConnection(r.Config)
 		if err != nil {

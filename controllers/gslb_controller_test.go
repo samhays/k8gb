@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/AbsaOSS/k8gb/controllers/dns"
 	"io/ioutil"
 	"os"
 	"strconv"
@@ -1131,6 +1132,13 @@ func provideSettings(t *testing.T, expected depresolver.Config) (settings testSe
 	if err != nil {
 		t.Fatalf("Failed to get expected ingress: (%v)", err)
 	}
+	// TODO: remove this, refactor
+	assistant :=
+		dns.NewGslbAssistant(r.Client, r.Log, r.Config.K8gbNamespace,
+			r.Config.EdgeDNSServer)
+	r.NS1 = dns.NewExternalDNS(dns.ExternalDNSTypeNS1, *r.Config, assistant)
+	r.Route53 = dns.NewExternalDNS(dns.ExternalDNSTypeRoute53, *r.Config, assistant)
+
 	// Reconcile again so Reconcile() checks services and updates the Gslb
 	// resources' Status.
 	settings = testSettings{

@@ -168,13 +168,24 @@ dns-smoke-test:
 # build the docker image
 .PHONY: docker-build
 docker-build: test
-	docker build . -t $(IMG)
+	$(call docker-build-arch,amd64)
+	$(call docker-build-arch,arm64)
 
 # push the docker image
 .PHONY: docker-push
 docker-push:
-	docker push $(IMG)
+	$(call docker-push-arch,amd64)
+	$(call docker-push-arch,arm64)
 
+# create and push docker manifest
+.PHONY: docker-manifest
+docker-manifest: docker-push
+	docker manifest create ${IMG} \
+		${IMG}-amd64 \
+		${IMG}-arm64
+	docker manifest annotate ${IMG} ${IMG}-arm64 \
+		--os linux --arch arm64
+	docker manifest push ${IMG}
 # build and push the docker image exclusively for testing using commit hash
 .PHONY: docker-test-build-push
 docker-test-build-push: test
@@ -410,6 +421,14 @@ endef
 define install-kustomize
 	GO111MODULE=on go get sigs.k8s.io/kustomize/kustomize/v3@v3.8.6
 	$(eval KUSTOMIZE_PATH = $(GOBIN)/kustomize)
+endef
+
+define docker-build-arch
+	docker build --build-arg GOARCH=${1} . -t ${IMG}-${1}
+endef
+
+define docker-push-arch
+	docker push ${IMG}-${1}
 endef
 
 define docker-test-build-push

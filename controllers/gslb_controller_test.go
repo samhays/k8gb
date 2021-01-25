@@ -3,13 +3,14 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"github.com/AbsaOSS/k8gb/controllers/dns"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AbsaOSS/k8gb/controllers/dns"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -743,6 +744,9 @@ func TestCreatesNSDNSRecordsForRoute53(t *testing.T) {
 	customConfig.DNSZone = dnsZone
 	// apply new environment variables and update config only
 	settings.reconciler.Config = &customConfig
+	// If config is changed, new Route53 provider needs to be re-created. There is no way and reason to change provider
+	// configuration at another time than startup
+	settings.reconciler.Route53 = provideDNSProvider(dns.ExternalDNSTypeRoute53, settings.reconciler)
 
 	reconcileAndUpdateGslb(t, settings)
 	err = settings.client.Get(context.TODO(), client.ObjectKey{Namespace: predefinedConfig.K8gbNamespace, Name: "k8gb-ns-route53"}, dnsEndpointRoute53)
@@ -810,6 +814,9 @@ func TestCreatesNSDNSRecordsForNS1(t *testing.T) {
 	customConfig.DNSZone = dnsZone
 	// apply new environment variables and update config only
 	settings.reconciler.Config = &customConfig
+	// If config is changed, new Route53 provider needs to be re-created. There is no way and reason to change provider
+	// configuration at another time than startup
+	settings.reconciler.NS1 = provideDNSProvider(dns.ExternalDNSTypeNS1, settings.reconciler)
 
 	reconcileAndUpdateGslb(t, settings)
 	err = settings.client.Get(context.TODO(), client.ObjectKey{Namespace: predefinedConfig.K8gbNamespace, Name: "k8gb-ns-ns1"}, dnsEndpointNS1)
@@ -1133,11 +1140,8 @@ func provideSettings(t *testing.T, expected depresolver.Config) (settings testSe
 		t.Fatalf("Failed to get expected ingress: (%v)", err)
 	}
 	// TODO: remove this, refactor
-	assistant :=
-		dns.NewGslbAssistant(r.Client, r.Log, r.Config.K8gbNamespace,
-			r.Config.EdgeDNSServer)
-	r.NS1 = dns.NewExternalDNS(dns.ExternalDNSTypeNS1, *r.Config, assistant)
-	r.Route53 = dns.NewExternalDNS(dns.ExternalDNSTypeRoute53, *r.Config, assistant)
+	r.NS1 = provideDNSProvider(dns.ExternalDNSTypeNS1, r)
+	r.Route53 = provideDNSProvider(dns.ExternalDNSTypeRoute53, r)
 
 	// Reconcile again so Reconcile() checks services and updates the Gslb
 	// resources' Status.
@@ -1152,6 +1156,11 @@ func provideSettings(t *testing.T, expected depresolver.Config) (settings testSe
 	}
 	reconcileAndUpdateGslb(t, settings)
 	return settings
+}
+
+func provideDNSProvider(dnsType dns.ExternalDNSType, reconciler *GslbReconciler) dns.IDnsProvider {
+	assistant := dns.NewGslbAssistant(reconciler.Client, log, reconciler.Config.K8gbNamespace, reconciler.Config.EdgeDNSServer)
+	return dns.NewExternalDNS(dnsType, *reconciler.Config, assistant)
 }
 
 func cleanup() {
